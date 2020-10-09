@@ -1,77 +1,76 @@
 /* Client code */
 #include <stdio.h>
-#include <sys/types.h>
-#include <sys/socket.h>
 #include <stdlib.h>
-#include <errno.h>
 #include <string.h>
+#include <sys/socket.h>
 #include <arpa/inet.h>
 #include <unistd.h>
-#include <netinet/in.h>
 
 #define PORT_NUMBER     5000
-#define SERVER_ADDRESS  "192.168.1.7"
-#define FILENAME        "new-file"
+#define SERVER_ADDRESS  "1.22.333.4444"    // replace with IP address of server machine
+#define NEW_FILENAME    "new-file.txt"
+#define CHUNK_SIZE      1024
 
 int main(int argc, char **argv)
 {
-        int client_socket;
-        ssize_t len;
-        struct sockaddr_in remote_addr;
-        char buffer[1024];
-        int file_size;
-        FILE *received_file;
-        int remain_data = 0;
+    int client_socket;
+    struct sockaddr_in remote_addr;
+    char buffer[CHUNK_SIZE] = {0};
+    long int file_size;
+    int remain_data = 0;
+    int total_recv = 0;
 
-        /* Zeroing remote_addr struct */
-        memset(&remote_addr, 0, sizeof(remote_addr));
+    /* Zeroing remote_addr struct */
+    memset(&remote_addr, 0, sizeof(remote_addr));
 
-        /* Construct remote_addr struct */
-        remote_addr.sin_family = AF_INET;
-        remote_addr.sin_port = htons(PORT_NUMBER);
-        inet_pton(AF_INET, SERVER_ADDRESS, &(remote_addr.sin_addr));
+    /* Construct remote_addr struct */
+    remote_addr.sin_family = AF_INET;
+    remote_addr.sin_port = htons(PORT_NUMBER);
+    inet_pton(AF_INET, SERVER_ADDRESS, &(remote_addr.sin_addr));
 
-        /* Create client socket */
-        client_socket = socket(AF_INET, SOCK_STREAM, 0);
-        if (client_socket < 0)
-        {
-                fprintf(stderr, "Error creating socket --> %s\n", strerror(errno));
+    /* Create client socket */
+    client_socket = socket(AF_INET, SOCK_STREAM, 0);
+    if (client_socket < 0)
+    {
+        perror("Error creating socket");
+        exit(EXIT_FAILURE);
+    }
 
-                exit(EXIT_FAILURE);
-        }
+    /* Connect to the server */
+    if (connect(client_socket, (struct sockaddr *)&remote_addr, sizeof(struct sockaddr)) < 0)
+    {
+        perror("Error connecting to server");
+        exit(EXIT_FAILURE);
+    }
+    printf("Client connected to server at port %d\n", PORT_NUMBER);
 
-        /* Connect to the server */
-        if (connect(client_socket, (struct sockaddr *)&remote_addr, sizeof(struct sockaddr)) == -1)
-        {
-                fprintf(stderr, "Error on connect --> %s\n", strerror(errno));
+    /* Receiving file size */
+    printf("Receiving message from server.\n");
+    int recv_size = recv(client_socket, buffer, sizeof(long) + 1, 0);
+    file_size = atol(buffer);
+    printf("\nFile size : %ld\n", file_size);
 
-                exit(EXIT_FAILURE);
-        }
+    /* Open a new file */
+    FILE *fp = fopen(NEW_FILENAME, "w+");
+    if (fp == NULL)
+    {
+        perror("Failed to open file");
+        exit(EXIT_FAILURE);
+    }
 
-        /* Receiving file size */
-        recv(client_socket, buffer, BUFSIZ, 0);
-        file_size = atoi(buffer);
-        fprintf(stdout, "\nFile size : %d\n", file_size);
+    while (total_recv < file_size)
+    {
+        recv_size = recv(client_socket, buffer, CHUNK_SIZE, 0);
+        total_recv += recv_size;
+        printf("Received %d Bytes. Total is %d\n", recv_size, total_recv);
+		fwrite(buffer, recv_size, 1, fp);
+    }
+    fseek(fp, 0, SEEK_END);
+	file_size = ftell(fp);
+	printf("New file size: %ld\n", file_size);
 
-        received_file = fopen(FILENAME, "w");
-        if (received_file == NULL)
-        {
-                fprintf(stderr, "Failed to open file --> %s\n", strerror(errno));
+    fclose(fp);
+    close(client_socket);
 
-                exit(EXIT_FAILURE);
-        }
-
-        remain_data = file_size;
-
-        while ((remain_data > 0) && ((len = recv(client_socket, buffer, BUFSIZ, 0)) > 0))
-        {
-                fwrite(buffer, sizeof(char), len, received_file);
-                remain_data -= len;
-                fprintf(stdout, "Receive %d bytes and we hope :- %d bytes\n", len, remain_data);
-        }
-        fclose(received_file);
-
-        close(client_socket);
-
-        return 0;
+    return 0;
 }
